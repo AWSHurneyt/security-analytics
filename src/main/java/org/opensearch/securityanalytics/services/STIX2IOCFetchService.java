@@ -5,12 +5,10 @@
 
 package org.opensearch.securityanalytics.services;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
-import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.io.stream.StreamInput;
@@ -34,9 +32,9 @@ import org.opensearch.securityanalytics.model.STIX2IOCDto;
 import org.opensearch.securityanalytics.settings.SecurityAnalyticsSettings;
 
 import java.io.IOException;
-import java.util.Collections;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer;
 
 /**
  * IOC Service implements operations that interact with retrieving IOCs from data sources,
@@ -48,35 +46,35 @@ public class STIX2IOCFetchService {
     private Client client;
     private ClusterService clusterService;
     private ConnectorFactory connectorFactory;
+    private S3ClientFactory s3ClientFactory;
 
     // TODO hurneyt this is using TIF batch size setting. Consider adding IOC-specific setting
-    private Integer batchSize = SecurityAnalyticsSettings.BATCH_SIZE.getDefault(Settings.EMPTY);
-
-    @VisibleForTesting
-    public STIX2IOCFetchService() {
-        StsAssumeRoleCredentialsProviderFactory factory =
-                new StsAssumeRoleCredentialsProviderFactory(new StsClientFactory());
-        S3ClientFactory s3ClientFactory = new S3ClientFactory(factory);
-        connectorFactory = new ConnectorFactory(new InputCodecFactory(), s3ClientFactory);
-    }
+    private Integer batchSize;
 
     public STIX2IOCFetchService(Client client, ClusterService clusterService) {
-        this();
         this.client = client;
         this.clusterService = clusterService;
+
+        StsAssumeRoleCredentialsProviderFactory factory =
+                new StsAssumeRoleCredentialsProviderFactory(new StsClientFactory());
+        s3ClientFactory = new S3ClientFactory(factory);
+        connectorFactory = new ConnectorFactory(new InputCodecFactory(), s3ClientFactory);
         batchSize = clusterService.getClusterSettings().get(SecurityAnalyticsSettings.BATCH_SIZE);
     }
 
     public void fetchIocs(S3ConnectorConfig s3ConnectorConfig, ActionListener<STIX2IOCFetchResponse> listener) {
+        // TODO hurneyt confirm with JOWG what config model to use
+        Instant startTime = Instant.now();
         validateS3ConnectorConfig(s3ConnectorConfig);
 
         FeedConfiguration feedConfiguration = new FeedConfiguration(IOCSchema.STIX2, InputCodecSchema.ND_JSON, s3ConnectorConfig);
-        S3Connector<IOC> s3Connector = (S3Connector<IOC>) connectorFactory.doCreate(feedConfiguration);
+        S3Connector s3Connector = (S3Connector<IOC>) connectorFactory.doCreate(feedConfiguration);
         STIX2IOCFeedStore feedStore = new STIX2IOCFeedStore(client, clusterService, s3ConnectorConfig, listener);
-        Consumer consumer = new STIX2IOCConsumer(batchSize, feedStore, UpdateType.REPLACE);
+        STIX2IOCConsumer consumer = new STIX2IOCConsumer(batchSize, feedStore, UpdateType.REPLACE);
 
+        // TODO hurneyt add start and end time; return in response
         s3Connector.load(consumer);
-        ((STIX2IOCConsumer) consumer).flushIOCs();
+        consumer.flushIOCs();
     }
 
     public void validateS3ConnectorConfig(S3ConnectorConfig s3ConnectorConfig) {
@@ -92,11 +90,14 @@ public class STIX2IOCFetchService {
     public static class STIX2IOCFetchResponse extends ActionResponse implements ToXContentObject {
         public static String IOCS_FIELD = "iocs";
         public static String TOTAL_FIELD = "total";
-        private List<STIX2IOCDto> iocs = Collections.emptyList();
+        private List<STIX2IOCDto> iocs = new ArrayList<>();
 
         public STIX2IOCFetchResponse(List<STIX2IOC> iocs) {
             super();
-            iocs.forEach( ioc -> this.iocs.add(new STIX2IOCDto(ioc)));
+            iocs.forEach(ioc -> {
+//                log.info("hurneyt ioc == null = {}", ioc == null);
+                this.iocs.add(new STIX2IOCDto(ioc));
+            });
         }
 
         public STIX2IOCFetchResponse(StreamInput sin) throws IOException {
@@ -113,7 +114,7 @@ public class STIX2IOCFetchService {
             return builder.startObject()
                     // TODO hurneyt include IOCs in response?
 //                    .field(IOCS_FIELD, this.iocs)
-                    .field(TOTAL_FIELD, this.iocs.size())
+                    .field(TOTAL_FIELD, iocs.size())
                     .endObject();
         }
 
