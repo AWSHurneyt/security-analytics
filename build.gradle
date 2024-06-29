@@ -168,7 +168,9 @@ dependencies {
     compileOnly "org.opensearch.client:opensearch-rest-client:${opensearch_version}"
     compileOnly "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
     compileOnly "org.opensearch:opensearch-job-scheduler-spi:${opensearch_build}"
-    compileOnly "org.opensearch.alerting:alerting-spi:${opensearch_build}"
+    compileOnly ("org.opensearch.alerting:alerting-spi:${opensearch_build}") {
+        exclude group: 'com.google.guava'
+    }
     implementation "org.apache.commons:commons-csv:1.10.0"
     compileOnly "com.google.guava:guava:32.1.3-jre"
 
@@ -179,7 +181,10 @@ dependencies {
     api files(sa_commons_file_path)
 
     // Needed for integ tests
-    zipArchive group: 'org.opensearch.plugin', name:'alerting', version: "${opensearch_build}"
+    zipArchive ("org.opensearch.plugin.alerting:${opensearch_build}") {
+//    zipArchive group: 'org.opensearch.plugin', name:'alerting', version: "${opensearch_build}" {
+        exclude group: 'com.google.guava'
+    }
     zipArchive group: 'org.opensearch.plugin', name:'opensearch-notifications-core', version: "${opensearch_build}"
     zipArchive group: 'org.opensearch.plugin', name:'notifications', version: "${opensearch_build}"
     zipArchive group: 'org.opensearch.plugin', name:'opensearch-job-scheduler', version: "${opensearch_build}"
